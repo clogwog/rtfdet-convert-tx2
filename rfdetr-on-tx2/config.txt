@@ -1,0 +1,34 @@
+[application]
+enable-perf-measurement=1
+perf-measurement-interval-sec=5
+
+# Primary GIE (TensorRT engine)
+[primary-gie]
+enable=1
+config-file=/data/src/rfdetr/config_infer_primary.txt
+
+# Video source
+[source0]
+enable=1
+type=3
+uri=file:///data/src/rfdetr/input.mp4
+num-sources=1
+gpu-id=0
+cudadec-memtype=0
+
+# Stream Muxer
+[streammux]
+width=1920
+height=1080
+batch-size=1
+batched-push-timeout=40000
+gpu-id=0
+
+# File sink (output video)
+[sink0]
+enable=1
+type=5
+sync=0
+codec=0
+bitrate=4000000
+

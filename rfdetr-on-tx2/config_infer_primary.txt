@@ -1,0 +1,10 @@
+[property]
+gpu-id=0
+net-scale-factor=1
+model-color-format=0
+model-engine-file=/data/src/rfdetr/rfdetr_nano.engine
+labelfile-path=/data/src/rfdetr/labels.txt
+batch-size=1
+network-mode=0
+num-detected-classes=91
+gie-unique-id=1
