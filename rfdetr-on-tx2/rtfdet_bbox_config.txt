@@ -1,0 +1,22 @@
+# merge betwe RR and toms config
+[property]
+num-detected-classes=91
+net-scale-factor=0.0173520736
+batch-size=1
+input-tensor-from-meta=0
+#model-engine-file=/rfdetr/rfdetr-nano.onnx_b1_gpu0_fp32.engine
+model-engine-file=rfdetr_nano.engine
+#onnx-file=/rfdetr/rfdetr-nano.onnx
+labelfile-path=labels.txt
+gie-unique-id=1
+network-mode=0
+offsets=123.675;116.28;103.53
+parse-bbox-func-name=deepstream_rfdetr_bbox
+custom-lib-path=libdeepstream-rfdetr.so
+model-color-format=0
+process-mode=1
+classifier-threshold=0.4
+enable-dla=0
+network-type=0
+maintain-aspect-ratio=1
+

@@ -1,3 +1,5 @@
+# toms try for the nvinfer config
+
 [property]
 gpu-id=0
 net-scale-factor=1

@@ -1,0 +1,42 @@
+
+DS_HOME ?= /opt/nvidia/deepstream/deepstream/
+CUDA_HOME ?= /usr/local/cuda/
+DEV ?= 0
+
+CXXFLAGS := -Wall -std=c++20 -fPIC -O3
+
+CXXFLAGS +=                     \
+  -I$(DS_HOME)/sources/includes \
+  -I$(CUDA_HOME)/include
+
+ifeq ($(DEV),1)
+CXXFLAGS += -O0 -ggdb3 -Werror
+endif
+
+LIBS := -lnvinfer
+LDFLAGS := -shared
+
+TARGET := libdeepstream-rfdetr.so
+
+SRCS := deepstream_rfdetr_bbox.cpp
+OBJS := $(SRCS:.cpp=.o)
+
+.PHONY: all clean lint format version
+
+all: $(TARGET)
+
+$(TARGET): $(OBJS) Makefile
+	$(CXX) -o $@ $(OBJS) $(LDFLAGS) $(LIBS)
+
+%.o: %.cpp Makefile
+	$(CXX) $(CXXFLAGS) -c $< -o $@
+
+clean:
+	rm -f *.o *.so *~ \#*
+
+lint:
+	clang-tidy --extra-arg=-isystem/usr/include/c++/13 --extra-arg=-isystem/usr/include/aarch64-linux-gnu/c++/13/  $(SRCS)
+
+format:
+	clang-format --style=file -i $(SRCS)
+
