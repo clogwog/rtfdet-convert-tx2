@@ -1,6 +1,7 @@
 
 DS_HOME ?= /opt/nvidia/deepstream/deepstream/
 CUDA_HOME ?= /usr/local/cuda/
+TENSORRT_HOME ?=
 DEV ?= 0
 
 CXXFLAGS := -Wall -std=c++20 -fPIC -O3
@@ -9,12 +10,19 @@ CXXFLAGS +=                     \
   -I$(DS_HOME)/sources/includes \
   -I$(CUDA_HOME)/include
 
+# Add TensorRT include path if TENSORRT_HOME is set, otherwise use local stubs
+ifneq ($(TENSORRT_HOME),)
+CXXFLAGS += -I$(TENSORRT_HOME)/include
+else
+CXXFLAGS += -I.
+endif
+
 ifeq ($(DEV),1)
 CXXFLAGS += -O0 -ggdb3 -Werror
 endif
 
-LIBS := -lnvinfer
-LDFLAGS := -shared
+LIBS := /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
+LDFLAGS := -shared -Wl,-rpath,/usr/lib/aarch64-linux-gnu
 
 TARGET := libdeepstream-rfdetr.so
 

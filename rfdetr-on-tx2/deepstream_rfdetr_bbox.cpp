@@ -10,6 +10,7 @@
  * without any encumbrance.
  */
 
+#include "NvInfer.h"
 #include <nvdsinfer.h>
 #include <nvdsinfer_custom_impl.h>
 
