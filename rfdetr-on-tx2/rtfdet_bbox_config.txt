@@ -12,8 +12,6 @@ offsets=123.675;116.28;103.53
 parse-bbox-func-name=deepstream_rfdetr_bbox
 custom-lib-path=/data/src/rtfdet-convert-tx2/rfdetr-on-tx2/libdeepstream-rfdetr.so
 output-blob-names=dets;labels
-input-blob-names=input
-infer-dims=3;224;224
 model-color-format=0
 process-mode=1
 classifier-threshold=0.4
@@ -23,6 +21,8 @@ maintain-aspect-ratio=1
 cluster-mode=4
 network-input-order=0
 symmetric-padding=1
+force-implicit-batch-dim=0
+interval=0
 
 [class-attrs-all]
 pre-cluster-threshold=0.5
