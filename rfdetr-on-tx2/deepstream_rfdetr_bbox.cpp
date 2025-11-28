@@ -125,15 +125,18 @@ auto softmax_of_best_logit(span<const T> logit,
   // 0) argmax
   std::size_t max_idx = 0;
   T max_val = logit[0];
-  for (std::size_t i = 1; i < size; ++i) {
-    if (logit[i] > max_val) {
+  for (std::size_t i = 1; i < size; ++i)
+  {
+    if (logit[i] > max_val)
+    {
       max_val = logit[i];
       max_idx = i;
     }
   }
 
   // 1) Ignore if its background
-  if (max_idx == Layer::Classes::BACKGROUND) {
+  if (max_idx == Layer::Classes::BACKGROUND)
+  {
     return std::nullopt;
   }
 
@@ -149,15 +152,18 @@ auto softmax_of_best_logit(span<const T> logit,
   // 4) accumulate Σ_{j≠max} exp(z_j - z_max)
   long double sum_exp_others = 0.0L;
 
-  for (std::size_t i = 0; i < size; ++i) {
-    if (i == max_idx) {
+  for (std::size_t i = 0; i < size; ++i)
+  {
+    if (i == max_idx)
+    {
       continue;
     }
 
     const auto diff = static_cast<long double>(logit[i] - max_val);
     sum_exp_others += std::exp(diff);
 
-    if (sum_exp_others > limit) {
+    if (sum_exp_others > limit)
+    {
       return std::nullopt;
     }
   }
@@ -274,6 +280,10 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto layer_boxes = layer_labels;  // labels layer has boxes (4 values)
   auto layer_classes = layer_dets;   // dets layer has classes (91 values)
 
+  std::cerr << "DeepStream-RFDETR: DEBUG - Found layers:\n";
+  std::cerr << "  - layer_dets (will be used as classes): " << layer_dets->layerName << "\n";
+  std::cerr << "  - layer_labels (will be used as boxes): " << layer_labels->layerName << "\n";
+
   auto layer_classes_num_dims = layer_classes->inferDims.numDims;
   auto layer_boxes_num_dims = layer_boxes->inferDims.numDims;
 
@@ -310,6 +320,12 @@ extern "C" auto deepstream_rfdetr_bbox(
       layer_classes_dims[Layer::Classes::Dims::DETECTIONS];
   auto num_classes = layer_classes_dims[Layer::Classes::Dims::CLASSES];
 
+  std::cerr << "DeepStream-RFDETR: DEBUG - Tensor dimensions:\n";
+  std::cerr << "  - Boxes tensor: " << num_detections_boxes << " detections x " << num_box_params << " params\n";
+  std::cerr << "  - Classes tensor: " << num_detections_classes << " detections x " << num_classes << " classes\n";
+  std::cerr << "  - Network size: " << width << "x" << height << "\n";
+  std::cerr << "  - Configured classes: " << params.numClassesConfigured << "\n";
+
   if (params.numClassesConfigured != num_classes) {
     std::cerr << "DeepStream-RFDETR: The classes tensor has a "
                  "different dimension size ("
@@ -337,19 +353,120 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto width = network.width;
   auto height = network.height;
 
+  // Debug: Print sample values from first few detections
+  std::cerr << "DeepStream-RFDETR: DEBUG - Sample data from first 3 detections:\n";
+  for (unsigned int i = 0; i < std::min(3u, num_detections_classes); ++i)
+  {
+    auto classes = view<float>(tensor_classes, i, num_classes);
+    auto boxes = view<float>(tensor_boxes, i, Layer::Boxes::Box::SIZE);
+    
+    std::cerr << "  Detection " << i << ":\n";
+    std::cerr << "    Box: cx=" << boxes[Layer::Boxes::Box::CX] 
+              << ", cy=" << boxes[Layer::Boxes::Box::CY]
+              << ", w=" << boxes[Layer::Boxes::Box::W]
+              << ", h=" << boxes[Layer::Boxes::Box::H] << "\n";
+    
+    // Find max class and its value
+    float max_class_val = classes[0];
+    std::size_t max_class_idx = 0;
+    for (std::size_t j = 1; j < num_classes; ++j)
+    {
+      if (classes[j] > max_class_val)
+      {
+        max_class_val = classes[j];
+        max_class_idx = j;
+      }
+    }
+    std::cerr << "    Classes: max_idx=" << max_class_idx 
+              << ", max_val=" << max_class_val
+              << ", first_5=[";
+    for (std::size_t j = 0; j < std::min(5ul, static_cast<std::size_t>(num_classes)); ++j)
+    {
+      std::cerr << classes[j];
+      if (j < std::min(4ul, static_cast<std::size_t>(num_classes) - 1))
+      {
+        std::cerr << ", ";
+      }
+    }
+    std::cerr << "]\n";
+  }
+
   // We can add at most num_detection_classes, pre-allocate
   detections.reserve(num_detections_classes);
 
-  for (unsigned int i = 0; i < num_detections_classes; ++i) {
+  unsigned int detections_passed = 0;
+  unsigned int detections_rejected = 0;
+  unsigned int rejected_background = 0;
+  unsigned int rejected_threshold = 0;
+
+  for (unsigned int i = 0; i < num_detections_classes; ++i)
+  {
     auto classes = view<float>(tensor_classes, i, num_classes);
     auto boxes = view<float>(tensor_boxes, i, Layer::Boxes::Box::SIZE);
 
+    // Check rejection reason before calling parse_detection
+    float max_class_val = classes[0];
+    std::size_t max_class_idx = 0;
+    for (std::size_t j = 1; j < num_classes; ++j)
+    {
+      if (classes[j] > max_class_val)
+      {
+        max_class_val = classes[j];
+        max_class_idx = j;
+      }
+    }
+
     auto detection = parse_detection(boxes, classes, params, width, height);
-    if (!detection) {
+    if (!detection)
+    {
+      detections_rejected++;
+      if (max_class_idx == Layer::Classes::BACKGROUND)
+      {
+        rejected_background++;
+      }
+      else
+      {
+        rejected_threshold++;
+      }
+      
+      // Debug first few rejections
+      if (detections_rejected <= 5)
+      {
+        if (max_class_idx == Layer::Classes::BACKGROUND)
+        {
+          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+                    << " rejected: background class (max_idx=0)\n";
+        }
+        else
+        {
+          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+                    << " rejected: threshold check failed (max_idx=" << max_class_idx
+                    << ", max_val=" << max_class_val << ")\n";
+        }
+      }
       continue;
     }
 
+    detections_passed++;
     detections.push_back(*detection);
+    
+    // Debug first few successful detections
+    if (detections_passed <= 3)
+    {
+      std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+                << " passed: class=" << detection->classId
+                << ", conf=" << detection->detectionConfidence
+                << ", bbox=[" << detection->left << ", " << detection->top
+                << ", " << detection->width << ", " << detection->height << "]\n";
+    }
+  }
+
+  std::cerr << "DeepStream-RFDETR: DEBUG - Summary: " << detections_passed 
+            << " passed, " << detections_rejected << " rejected\n";
+  if (detections_rejected > 0)
+  {
+    std::cerr << "  - Rejected (background): " << rejected_background << "\n";
+    std::cerr << "  - Rejected (threshold): " << rejected_threshold << "\n";
   }
 
   return true;
