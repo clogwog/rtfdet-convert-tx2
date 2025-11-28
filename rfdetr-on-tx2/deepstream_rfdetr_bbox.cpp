@@ -271,7 +271,8 @@ extern "C" auto deepstream_rfdetr_bbox(
   }
 
   // Debug: Check input tensor (first layer should be input)
-  if (layers.size() > 0 && layers[0].layerName == std::string_view("input")) {
+  if (layers.size() > 0 && layers[0].layerName == std::string_view("input")) 
+  {
     std::cerr << "DeepStream-RFDETR: DEBUG - Input layer found: " << layers[0].layerName
               << ", buffer: " << layers[0].buffer << "\n";
     // Check if input buffer has data (not all zeros)
@@ -288,7 +289,12 @@ extern "C" auto deepstream_rfdetr_bbox(
       std::cerr << "DeepStream-RFDETR: DEBUG - Input buffer has " << (has_nonzero ? "non-zero" : "all zero") << " values\n";
     }
   }
-  
+  else
+  {
+    std::cerr << "DeepStream-RFDETR: DEBUG - Input layer not found: " << layers[0].layerName << "\n";
+    return false;
+  }
+
   std::cerr << "DeepStream-RFDETR: DEBUG - All available layers:\n";
   for (std::size_t i = 0; i < layers.size(); ++i)
   {
