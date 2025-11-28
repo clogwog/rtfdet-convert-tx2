@@ -418,10 +418,12 @@ extern "C" auto deepstream_rfdetr_bbox(
     std::cerr << "DeepStream-RFDETR: The boxes tensor has a "
                  "different box dimension size ("
               << num_box_params << ") than the expected ("
-              << Layer::Boxes::Box::SIZE << "). Did you pass "
-              << "in the correct model?\n";
-    std::cerr << "DeepStream-RFDETR: DEBUG - Attempting to handle different box format...\n";
-    // Don't return false immediately - try to handle different formats
+              << Layer::Boxes::Box::SIZE << "). The model appears to output "
+              << num_detections_boxes << "x" << num_box_params << " tensors instead of expected 300x4 detection format.\n";
+    std::cerr << "DeepStream-RFDETR: This suggests the RF-DETR model export is incorrect or the model outputs a different format (possibly segmentation/feature maps instead of detections).\n";
+    std::cerr << "DeepStream-RFDETR: Returning empty detections to avoid crash. Please fix the model export.\n";
+    detections.clear();
+    return true;
   }
 
   const span<const unsigned int> layer_classes_dims{

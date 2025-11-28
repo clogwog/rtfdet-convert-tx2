@@ -15,7 +15,7 @@ labelfile-path=labels.txt
 gie-unique-id=1
 network-mode=0
 parse-bbox-func-name=deepstream_rfdetr_bbox
-custom-lib-path=/data/src/rtfdet-convert-tx2/rfdetr-on-tx2/libdeepstream-rfdetr.so
+custom-lib-path=/workspace/rtfdet-convert-tx2/rfdetr-on-tx2/libdeepstream-rfdetr.so
 
 output-blob-names=dets;labels
 model-color-format=0
