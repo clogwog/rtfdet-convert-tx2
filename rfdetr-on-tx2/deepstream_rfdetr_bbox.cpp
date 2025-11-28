@@ -195,11 +195,11 @@ extern "C" auto deepstream_rfdetr_bbox(
     const NvDsInferNetworkInfo &network,
     const NvDsInferParseDetectionParams &params,
     std::vector<NvDsInferObjectDetectionInfo> &detections) -> bool {
-  auto layer_boxes = find_layer(layers, Layer::Boxes::NAME, Layer::Boxes::TYPE);
-  auto layer_classes =
+  auto layer_dets = find_layer(layers, Layer::Boxes::NAME, Layer::Boxes::TYPE);
+  auto layer_labels =
       find_layer(layers, Layer::Classes::NAME, Layer::Classes::TYPE);
 
-  if (!layer_boxes || !layer_classes) {
+  if (!layer_dets || !layer_labels) {
     std::cerr << "DeepStream-RFDETR: Unable to find output layers named \""
               << Layer::Boxes::NAME << "\" and \"" << Layer::Classes::NAME
               << "\". Did you pass the right engine?\n"
@@ -211,8 +211,14 @@ extern "C" auto deepstream_rfdetr_bbox(
     return false;
   }
 
+  // The model outputs are swapped: "dets" contains class logits (300x91)
+  // and "labels" contains box coordinates (300x4)
+  // So we swap the interpretation here
+  auto layer_boxes = layer_labels;  // labels layer has boxes (4 values)
+  auto layer_classes = layer_dets;   // dets layer has classes (91 values)
+
   auto layer_classes_num_dims = layer_classes->inferDims.numDims;
-  auto layer_boxes_num_dims = layer_classes->inferDims.numDims;
+  auto layer_boxes_num_dims = layer_boxes->inferDims.numDims;
 
   if (Layer::Classes::Dims::NUM_DIMS != layer_classes_num_dims ||
       Layer::Boxes::Dims::NUM_DIMS != layer_boxes_num_dims) {
