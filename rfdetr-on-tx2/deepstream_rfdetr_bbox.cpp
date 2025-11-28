@@ -206,40 +206,52 @@ auto view(span<const T> buffer, unsigned int offset,
 template <typename T>
 auto parse_detection(span<const T> boxes, span<const T> classes,
                      const NvDsInferParseDetectionParams &params,
-                     unsigned int width, unsigned int height)
+                     unsigned int width, unsigned int height,
+                     bool use_probabilities = false)
     -> std::optional<NvDsInferObjectDetectionInfo> {
-  auto best = softmax_of_best_logit(
-      classes, span<const T>{params.perClassPreclusterThreshold});
+  std::optional<std::pair<std::size_t, T>> best;
+
+  if (use_probabilities)
+  {
+    // Layer 4132 has probability values, not logits - find max directly
+    std::size_t max_idx = 0;
+    T max_val = classes[0];
+    for (std::size_t i = 1; i < classes.size(); ++i)
+    {
+      if (classes[i] > max_val)
+      {
+        max_val = classes[i];
+        max_idx = i;
+      }
+    }
+
+    // Check threshold
+    T threshold = params.perClassPreclusterThreshold[max_idx];
+    if (max_val < threshold)
+    {
+      return std::nullopt;
+    }
+
+    best = std::make_pair(max_idx, max_val);
+  }
+  else
+  {
+    // Original layers use logits with softmax
+    best = softmax_of_best_logit(classes, span<const T>{params.perClassPreclusterThreshold});
+  }
+
   if (!best) {
     return std::nullopt;
   }
 
   T box_x1, box_y1, box_x2, box_y2;
 
-  // Check if boxes are in [cx,cy,w,h] or [x1,y1,x2,y2] format
-  // If w and h are reasonable (not inf/nan and > 0), assume [cx,cy,w,h]
-  // Otherwise, assume [x1,y1,x2,y2] format
-  if (!std::isinf(boxes[Layer::Boxes::Box::W]) &&
-      !std::isnan(boxes[Layer::Boxes::Box::W]) &&
-      !std::isinf(boxes[Layer::Boxes::Box::H]) &&
-      !std::isnan(boxes[Layer::Boxes::Box::H]) &&
-      boxes[Layer::Boxes::Box::W] > 0 &&
-      boxes[Layer::Boxes::Box::H] > 0)
-  {
-    // [cx,cy,w,h] format - center x, center y, width, height
-    box_x1 = (boxes[Layer::Boxes::Box::CX] - boxes[Layer::Boxes::Box::W] / 2) * width / 224.0;
-    box_y1 = (boxes[Layer::Boxes::Box::CY] - boxes[Layer::Boxes::Box::H] / 2) * height / 224.0;
-    box_x2 = box_x1 + boxes[Layer::Boxes::Box::W] * width / 224.0;
-    box_y2 = box_y1 + boxes[Layer::Boxes::Box::H] * height / 224.0;
-  }
-  else
-  {
-    // [x1,y1,x2,y2] format - corner coordinates (normalized 0-1)
-    box_x1 = boxes[Layer::Boxes::Box::CX] * width;  // x1
-    box_y1 = boxes[Layer::Boxes::Box::CY] * height; // y1
-    box_x2 = boxes[Layer::Boxes::Box::W] * width;   // x2
-    box_y2 = boxes[Layer::Boxes::Box::H] * height;  // y2
-  }
+  // For Layer 2970, coordinates are already normalized 0-1, so treat as [x1,y1,x2,y2]
+  // x1,y1,x2,y2 format - corner coordinates (normalized 0-1)
+  box_x1 = boxes[Layer::Boxes::Box::CX] * width;  // x1
+  box_y1 = boxes[Layer::Boxes::Box::CY] * height; // y1
+  box_x2 = boxes[Layer::Boxes::Box::W] * width;   // x2
+  box_y2 = boxes[Layer::Boxes::Box::H] * height;  // y2
 
   const float max_x = static_cast<float>(width) - 1.0F;
   const float max_y = static_cast<float>(height) - 1.0F;
@@ -324,8 +336,9 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto layer_classes = layer_dets;   // dets layer has classes (91 values)
 
   std::cerr << "DeepStream-RFDETR: DEBUG - Found layers:\n";
-  std::cerr << "  - layer_dets (will be used as classes): " << layer_dets->layerName << "\n";
-  std::cerr << "  - layer_labels (will be used as boxes): " << layer_labels->layerName << "\n";
+  std::cerr << "  - layer_dets (original classes): " << layer_dets->layerName << "\n";
+  std::cerr << "  - layer_labels (original boxes): " << layer_labels->layerName << "\n";
+  std::cerr << "  - Will use: classes=" << layer_classes->layerName << ", boxes=" << layer_boxes->layerName << "\n";
 
   auto layer_classes_num_dims = layer_classes->inferDims.numDims;
   auto layer_boxes_num_dims = layer_boxes->inferDims.numDims;
@@ -498,32 +511,33 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto width = network.width;
   auto height = network.height;
 
-  // Debug: Check all output layers to understand the format
-  std::cerr << "DeepStream-RFDETR: DEBUG - Analyzing all output layers:\n";
-  for (std::size_t layer_idx = 0; layer_idx < layers.size(); ++layer_idx)
+  // Try using Layer 5 (4132) for classes instead - it has probability-like values
+  auto layer_classes_4132 = find_layer(layers, "4132", Layer::Classes::TYPE);
+  auto layer_boxes_2970 = find_layer(layers, "2970", Layer::Boxes::TYPE);
+
+  if (layer_classes_4132 && layer_boxes_2970)
   {
-    const auto& layer = layers[layer_idx];
-    std::size_t layer_size = 1;
-    for (unsigned int i = 0; i < layer.inferDims.numDims; i++) {
-      layer_size *= layer.inferDims.d[i];
-    }
+    std::cerr << "DeepStream-RFDETR: DEBUG - Switching to Layer 4132 for classes and Layer 2970 for boxes\n";
+    // Override the layer pointers
+    layer_classes = layer_classes_4132;
+    layer_boxes = layer_boxes_2970;
 
-    auto tensor = layer_to_span<float>(layer);
-    std::cerr << "  Layer " << layer_idx << " (" << layer.layerName << "): "
-              << layer.inferDims.d[0];
-    for (unsigned int i = 1; i < layer.inferDims.numDims; i++) {
-      std::cerr << "x" << layer.inferDims.d[i];
-    }
-    std::cerr << " = " << layer_size << " elements\n";
+    // Update dimensions
+    layer_classes_num_dims = layer_classes->inferDims.numDims;
+    layer_boxes_num_dims = layer_boxes->inferDims.numDims;
 
-    // Show first 20 values
-    std::cerr << "    First 20 values: [";
-    for (std::size_t i = 0; i < std::min(20ul, tensor.size()); ++i) {
-      std::cerr << tensor[i];
-      if (i < std::min(19ul, tensor.size() - 1)) std::cerr << ", ";
-      if ((i + 1) % 10 == 0) std::cerr << "\n                     ";
-    }
-    std::cerr << "]\n";
+    const span<const unsigned int> layer_boxes_dims_2970{
+        layer_boxes->inferDims.d, NVDSINFER_MAX_DIMS};
+    num_detections_boxes = layer_boxes_dims_2970[Layer::Boxes::Dims::DETECTIONS];
+    num_box_params = layer_boxes_dims_2970[Layer::Boxes::Dims::BOXES];
+
+    const span<const unsigned int> layer_classes_dims_4132{
+        layer_classes->inferDims.d, NVDSINFER_MAX_DIMS};
+    num_detections_classes = layer_classes_dims_4132[Layer::Classes::Dims::DETECTIONS];
+    num_classes = layer_classes_dims_4132[Layer::Classes::Dims::CLASSES];
+
+    std::cerr << "DeepStream-RFDETR: DEBUG - New dimensions - Classes: " << num_detections_classes
+              << "x" << num_classes << ", Boxes: " << num_detections_boxes << "x" << num_box_params << "\n";
   }
 
   // Debug: Print sample values from first few detections
@@ -589,13 +603,28 @@ extern "C" auto deepstream_rfdetr_bbox(
       }
     }
 
-    // Check for invalid box coordinates
-    bool invalid_box = std::isinf(boxes[Layer::Boxes::Box::W]) ||
-                       std::isinf(boxes[Layer::Boxes::Box::H]) ||
-                       std::isnan(boxes[Layer::Boxes::Box::W]) ||
-                       std::isnan(boxes[Layer::Boxes::Box::H]) ||
-                       boxes[Layer::Boxes::Box::W] <= 0 ||
-                       boxes[Layer::Boxes::Box::H] <= 0;
+    // Check for invalid box coordinates (different validation for different layers)
+    bool invalid_box = false;
+    if (layer_boxes->layerName == std::string_view("2970"))
+    {
+      // Layer 2970: normalized coordinates 0-1, check for valid range and positive area
+      invalid_box = (boxes[Layer::Boxes::Box::CX] < 0 || boxes[Layer::Boxes::Box::CX] > 1 ||
+                     boxes[Layer::Boxes::Box::CY] < 0 || boxes[Layer::Boxes::Box::CY] > 1 ||
+                     boxes[Layer::Boxes::Box::W] < boxes[Layer::Boxes::Box::CX] ||
+                     boxes[Layer::Boxes::Box::H] < boxes[Layer::Boxes::Box::CY] ||
+                     boxes[Layer::Boxes::Box::W] < 0 || boxes[Layer::Boxes::Box::W] > 1 ||
+                     boxes[Layer::Boxes::Box::H] < 0 || boxes[Layer::Boxes::Box::H] > 1);
+    }
+    else
+    {
+      // Original layers: check for inf/nan and negative dimensions
+      invalid_box = std::isinf(boxes[Layer::Boxes::Box::W]) ||
+                    std::isinf(boxes[Layer::Boxes::Box::H]) ||
+                    std::isnan(boxes[Layer::Boxes::Box::W]) ||
+                    std::isnan(boxes[Layer::Boxes::Box::H]) ||
+                    boxes[Layer::Boxes::Box::W] <= 0 ||
+                    boxes[Layer::Boxes::Box::H] <= 0;
+    }
 
     if (invalid_box)
     {
@@ -604,13 +633,16 @@ extern "C" auto deepstream_rfdetr_bbox(
       if (detections_rejected <= 5)
       {
         std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
-                  << " rejected: invalid box (w=" << boxes[Layer::Boxes::Box::W]
+                  << " rejected: invalid box (cx=" << boxes[Layer::Boxes::Box::CX]
+                  << ", cy=" << boxes[Layer::Boxes::Box::CY]
+                  << ", w=" << boxes[Layer::Boxes::Box::W]
                   << ", h=" << boxes[Layer::Boxes::Box::H] << ")\n";
       }
       continue;
     }
 
-    auto detection = parse_detection(boxes, classes, params, width, height);
+    bool use_probabilities = (layer_classes->layerName == std::string_view("4132"));
+    auto detection = parse_detection(boxes, classes, params, width, height, use_probabilities);
     if (!detection)
     {
       detections_rejected++;
