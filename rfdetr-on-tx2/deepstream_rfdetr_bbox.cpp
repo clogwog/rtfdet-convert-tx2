@@ -391,8 +391,8 @@ extern "C" auto deepstream_rfdetr_bbox(
 
   // Handle both 2D (traditional) and 3D (with batch dimension) tensors
   bool has_batch_dim = (layer_classes_num_dims == 3 && layer_boxes_num_dims == 3);
-  int expected_classes_dims = has_batch_dim ? 3 : Layer::Classes::Dims::NUM_DIMS;
-  int expected_boxes_dims = has_batch_dim ? 3 : Layer::Boxes::Dims::NUM_DIMS;
+  unsigned int expected_classes_dims = has_batch_dim ? 3 : Layer::Classes::Dims::NUM_DIMS;
+  unsigned int expected_boxes_dims = has_batch_dim ? 3 : Layer::Boxes::Dims::NUM_DIMS;
 
   if (expected_classes_dims != layer_classes_num_dims ||
       expected_boxes_dims != layer_boxes_num_dims) {
