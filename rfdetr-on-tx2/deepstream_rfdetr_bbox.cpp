@@ -323,7 +323,7 @@ extern "C" auto deepstream_rfdetr_bbox(
   std::cerr << "DeepStream-RFDETR: DEBUG - Tensor dimensions:\n";
   std::cerr << "  - Boxes tensor: " << num_detections_boxes << " detections x " << num_box_params << " params\n";
   std::cerr << "  - Classes tensor: " << num_detections_classes << " detections x " << num_classes << " classes\n";
-  std::cerr << "  - Network size: " << width << "x" << height << "\n";
+  std::cerr << "  - Network size: " << network.width << "x" << network.height << "\n";
   std::cerr << "  - Configured classes: " << params.numClassesConfigured << "\n";
 
   if (params.numClassesConfigured != num_classes) {
