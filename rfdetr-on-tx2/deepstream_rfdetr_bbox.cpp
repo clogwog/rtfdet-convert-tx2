@@ -22,12 +22,69 @@
 #include <iostream>
 #include <limits>
 #include <optional>
-#include <span>
 #include <string_view>
 #include <utility>
 #include <vector>
 
 namespace {
+
+// Simple span replacement for C++17 compatibility
+template <typename T>
+class span
+{
+public:
+    using element_type = T;
+    using value_type = typename std::remove_cv<T>::type;
+    using size_type = std::size_t;
+    using difference_type = std::ptrdiff_t;
+    using pointer = T*;
+    using const_pointer = const T*;
+    using reference = T&;
+    using const_reference = const T&;
+    using iterator = pointer;
+    using const_iterator = const_pointer;
+
+    constexpr span() noexcept : data_(nullptr), size_(0) {}
+    constexpr span(pointer ptr, size_type count) noexcept : data_(ptr), size_(count) {}
+    template <typename U, typename = typename std::enable_if<
+        std::is_same<typename std::remove_cv<U>::type, typename std::remove_cv<T>::type>::value &&
+        !std::is_same<U, T>::value>::type>
+    constexpr span(U* ptr, size_type count) noexcept : data_(ptr), size_(count) {}
+    template <std::size_t N>
+    constexpr span(T (&arr)[N]) noexcept : data_(arr), size_(N) {}
+    template <typename Container>
+    constexpr span(Container& c) noexcept : data_(c.data()), size_(c.size()) {}
+
+    constexpr pointer data() const noexcept { return data_; }
+    constexpr size_type size() const noexcept { return size_; }
+    constexpr bool empty() const noexcept { return size_ == 0; }
+    constexpr reference operator[](size_type idx) const { return data_[idx]; }
+    constexpr pointer begin() const noexcept { return data_; }
+    constexpr pointer end() const noexcept { return data_ + size_; }
+    constexpr const_pointer cbegin() const noexcept { return data_; }
+    constexpr const_pointer cend() const noexcept { return data_ + size_; }
+
+    constexpr span<T> subspan(size_type offset, size_type count = std::numeric_limits<size_type>::max()) const noexcept
+    {
+        size_type actual_count = (count == std::numeric_limits<size_type>::max()) ? (size_ - offset) : count;
+        return span<T>(data_ + offset, actual_count);
+    }
+
+private:
+    pointer data_;
+    size_type size_;
+};
+
+// Deduction guides
+template <typename T, std::size_t N>
+span(T (&)[N]) -> span<T>;
+
+template <typename Container>
+span(Container&) -> span<typename Container::value_type>;
+
+template <typename Container>
+span(const Container&) -> span<const typename Container::value_type>;
+
 
 struct Layer {
   struct Classes {
@@ -58,8 +115,8 @@ struct Layer {
 };
 
 template <typename T>
-auto softmax_of_best_logit(std::span<const T> logit,
-                           std::span<const T> thresholds)
+auto softmax_of_best_logit(span<const T> logit,
+                           span<const T> thresholds)
     -> std::optional<std::pair<std::size_t, T>> {
   const std::size_t size = logit.size();
   assert(size > 0);
@@ -129,8 +186,8 @@ auto find_layer(const std::vector<NvDsInferLayerInfo> &layers,
 };
 
 template <typename T>
-auto view(std::span<const T> buffer, unsigned int offset,
-          unsigned int size) -> std::span<const T> {
+auto view(span<const T> buffer, unsigned int offset,
+          unsigned int size) -> span<const T> {
   const auto block_start = static_cast<std::size_t>(offset) * size;
   const auto block_size = static_cast<std::size_t>(size);
 
@@ -140,12 +197,12 @@ auto view(std::span<const T> buffer, unsigned int offset,
 }
 
 template <typename T>
-auto parse_detection(std::span<const T> boxes, std::span<const T> classes,
+auto parse_detection(span<const T> boxes, span<const T> classes,
                      const NvDsInferParseDetectionParams &params,
                      unsigned int width, unsigned int height)
     -> std::optional<NvDsInferObjectDetectionInfo> {
   auto best = softmax_of_best_logit(
-      classes, std::span{params.perClassPreclusterThreshold});
+      classes, span<const T>{params.perClassPreclusterThreshold});
   if (!best) {
     return std::nullopt;
   }
@@ -179,13 +236,13 @@ auto parse_detection(std::span<const T> boxes, std::span<const T> classes,
 }
 
 template <typename T>
-auto layer_to_span(const NvDsInferLayerInfo &layer) -> std::span<const T> {
+auto layer_to_span(const NvDsInferLayerInfo &layer) -> span<const T> {
   std::size_t layer_size = 1;
   for (unsigned int i = 0; i < layer.inferDims.numDims; i++) {
     layer_size *= layer.inferDims.d[i];
   }
 
-  return std::span<const T>(static_cast<T *>(layer.buffer), layer_size);
+  return span<const T>(static_cast<T *>(layer.buffer), layer_size);
 }
 
 }  // namespace
@@ -233,8 +290,8 @@ extern "C" auto deepstream_rfdetr_bbox(
     return false;
   }
 
-  const std::span<const unsigned int, NVDSINFER_MAX_DIMS> layer_boxes_dims{
-      layer_boxes->inferDims.d};
+  const span<const unsigned int> layer_boxes_dims{
+      layer_boxes->inferDims.d, NVDSINFER_MAX_DIMS};
   auto num_detections_boxes = layer_boxes_dims[Layer::Boxes::Dims::DETECTIONS];
   auto num_box_params = layer_boxes_dims[Layer::Boxes::Dims::BOXES];
 
@@ -247,8 +304,8 @@ extern "C" auto deepstream_rfdetr_bbox(
     return false;
   }
 
-  const std::span<const unsigned int, NVDSINFER_MAX_DIMS> layer_classes_dims{
-      layer_classes->inferDims.d};
+  const span<const unsigned int> layer_classes_dims{
+      layer_classes->inferDims.d, NVDSINFER_MAX_DIMS};
   auto num_detections_classes =
       layer_classes_dims[Layer::Classes::Dims::DETECTIONS];
   auto num_classes = layer_classes_dims[Layer::Classes::Dims::CLASSES];

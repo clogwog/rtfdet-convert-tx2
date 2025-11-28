@@ -4,7 +4,7 @@ CUDA_HOME ?= /usr/local/cuda/
 TENSORRT_HOME ?=
 DEV ?= 0
 
-CXXFLAGS := -Wall -std=c++20 -fPIC -O3
+CXXFLAGS := -Wall -std=c++17 -fPIC -O3
 
 CXXFLAGS +=                     \
   -I$(DS_HOME)/sources/includes \
