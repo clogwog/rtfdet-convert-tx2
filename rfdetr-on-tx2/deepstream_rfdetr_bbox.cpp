@@ -270,30 +270,8 @@ extern "C" auto deepstream_rfdetr_bbox(
     return true;
   }
 
-  // Debug: Check input tensor (first layer should be input)
-  if (layers.size() > 0 && layers[0].layerName == std::string_view("input")) 
-  {
-    std::cerr << "DeepStream-RFDETR: DEBUG - Input layer found: " << layers[0].layerName
-              << ", buffer: " << layers[0].buffer << "\n";
-    // Check if input buffer has data (not all zeros)
-    if (layers[0].buffer != nullptr) {
-      const float* input_data = static_cast<const float*>(layers[0].buffer);
-      bool has_nonzero = false;
-      size_t max_check = static_cast<size_t>(layers[0].inferDims.d[0]) * layers[0].inferDims.d[1] * layers[0].inferDims.d[2];
-      for (size_t i = 0; i < std::min(100ul, max_check); ++i) {
-        if (input_data[i] != 0.0f) {
-          has_nonzero = true;
-          break;
-        }
-      }
-      std::cerr << "DeepStream-RFDETR: DEBUG - Input buffer has " << (has_nonzero ? "non-zero" : "all zero") << " values\n";
-    }
-  }
-  else
-  {
-    std::cerr << "DeepStream-RFDETR: DEBUG - Input layer not found: " << layers[0].layerName << "\n";
-    return false;
-  }
+  // Note: DeepStream only passes OUTPUT layers to custom parsers, not input layers
+  // So we can't check input data here
 
   std::cerr << "DeepStream-RFDETR: DEBUG - All available layers:\n";
   for (std::size_t i = 0; i < layers.size(); ++i)
