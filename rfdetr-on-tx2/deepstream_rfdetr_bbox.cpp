@@ -214,12 +214,32 @@ auto parse_detection(span<const T> boxes, span<const T> classes,
     return std::nullopt;
   }
 
-  T box_x1 =
-      (boxes[Layer::Boxes::Box::CX] - boxes[Layer::Boxes::Box::W] / 2) * width;
-  T box_y1 =
-      (boxes[Layer::Boxes::Box::CY] - boxes[Layer::Boxes::Box::H] / 2) * height;
-  T box_x2 = box_x1 + boxes[Layer::Boxes::Box::W] * width;
-  T box_y2 = box_y1 + boxes[Layer::Boxes::Box::H] * height;
+  T box_x1, box_y1, box_x2, box_y2;
+
+  // Check if boxes are in [cx,cy,w,h] or [x1,y1,x2,y2] format
+  // If w and h are reasonable (not inf/nan and > 0), assume [cx,cy,w,h]
+  // Otherwise, assume [x1,y1,x2,y2] format
+  if (!std::isinf(boxes[Layer::Boxes::Box::W]) &&
+      !std::isnan(boxes[Layer::Boxes::Box::W]) &&
+      !std::isinf(boxes[Layer::Boxes::Box::H]) &&
+      !std::isnan(boxes[Layer::Boxes::Box::H]) &&
+      boxes[Layer::Boxes::Box::W] > 0 &&
+      boxes[Layer::Boxes::Box::H] > 0)
+  {
+    // [cx,cy,w,h] format - center x, center y, width, height
+    box_x1 = (boxes[Layer::Boxes::Box::CX] - boxes[Layer::Boxes::Box::W] / 2) * width / 224.0;
+    box_y1 = (boxes[Layer::Boxes::Box::CY] - boxes[Layer::Boxes::Box::H] / 2) * height / 224.0;
+    box_x2 = box_x1 + boxes[Layer::Boxes::Box::W] * width / 224.0;
+    box_y2 = box_y1 + boxes[Layer::Boxes::Box::H] * height / 224.0;
+  }
+  else
+  {
+    // [x1,y1,x2,y2] format - corner coordinates (normalized 0-1)
+    box_x1 = boxes[Layer::Boxes::Box::CX] * width;  // x1
+    box_y1 = boxes[Layer::Boxes::Box::CY] * height; // y1
+    box_x2 = boxes[Layer::Boxes::Box::W] * width;   // x2
+    box_y2 = boxes[Layer::Boxes::Box::H] * height;  // y2
+  }
 
   const float max_x = static_cast<float>(width) - 1.0F;
   const float max_y = static_cast<float>(height) - 1.0F;
@@ -478,6 +498,34 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto width = network.width;
   auto height = network.height;
 
+  // Debug: Check all output layers to understand the format
+  std::cerr << "DeepStream-RFDETR: DEBUG - Analyzing all output layers:\n";
+  for (std::size_t layer_idx = 0; layer_idx < layers.size(); ++layer_idx)
+  {
+    const auto& layer = layers[layer_idx];
+    std::size_t layer_size = 1;
+    for (unsigned int i = 0; i < layer.inferDims.numDims; i++) {
+      layer_size *= layer.inferDims.d[i];
+    }
+
+    auto tensor = layer_to_span<float>(layer);
+    std::cerr << "  Layer " << layer_idx << " (" << layer.layerName << "): "
+              << layer.inferDims.d[0];
+    for (unsigned int i = 1; i < layer.inferDims.numDims; i++) {
+      std::cerr << "x" << layer.inferDims.d[i];
+    }
+    std::cerr << " = " << layer_size << " elements\n";
+
+    // Show first 20 values
+    std::cerr << "    First 20 values: [";
+    for (std::size_t i = 0; i < std::min(20ul, tensor.size()); ++i) {
+      std::cerr << tensor[i];
+      if (i < std::min(19ul, tensor.size() - 1)) std::cerr << ", ";
+      if ((i + 1) % 10 == 0) std::cerr << "\n                     ";
+    }
+    std::cerr << "]\n";
+  }
+
   // Debug: Print sample values from first few detections
   std::cerr << "DeepStream-RFDETR: DEBUG - Sample data from first 3 detections:\n";
   for (unsigned int i = 0; i < std::min(3u, num_detections_classes); ++i)
@@ -541,6 +589,27 @@ extern "C" auto deepstream_rfdetr_bbox(
       }
     }
 
+    // Check for invalid box coordinates
+    bool invalid_box = std::isinf(boxes[Layer::Boxes::Box::W]) ||
+                       std::isinf(boxes[Layer::Boxes::Box::H]) ||
+                       std::isnan(boxes[Layer::Boxes::Box::W]) ||
+                       std::isnan(boxes[Layer::Boxes::Box::H]) ||
+                       boxes[Layer::Boxes::Box::W] <= 0 ||
+                       boxes[Layer::Boxes::Box::H] <= 0;
+
+    if (invalid_box)
+    {
+      detections_rejected++;
+      rejected_threshold++;  // Count as threshold failure
+      if (detections_rejected <= 5)
+      {
+        std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
+                  << " rejected: invalid box (w=" << boxes[Layer::Boxes::Box::W]
+                  << ", h=" << boxes[Layer::Boxes::Box::H] << ")\n";
+      }
+      continue;
+    }
+
     auto detection = parse_detection(boxes, classes, params, width, height);
     if (!detection)
     {
@@ -553,18 +622,18 @@ extern "C" auto deepstream_rfdetr_bbox(
       {
         rejected_threshold++;
       }
-      
+
       // Debug first few rejections
       if (detections_rejected <= 5)
       {
         if (max_class_idx == Layer::Classes::BACKGROUND)
         {
-          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
                     << " rejected: background class (max_idx=0)\n";
         }
         else
         {
-          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+          std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
                     << " rejected: threshold check failed (max_idx=" << max_class_idx
                     << ", max_val=" << max_class_val << ")\n";
         }
