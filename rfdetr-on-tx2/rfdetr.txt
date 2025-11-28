@@ -8,9 +8,10 @@ num-detected-classes=91
 batch-size=1
 input-tensor-from-meta=0
 # TX2-compatible model files
-model-engine-file=output/rfdetr_nano_tx2.engine
-onnx-file=output/inference_model_tx2.sim.onnx
+model-engine-file=models/rfdetr_nano_tx2.engine
+onnx-file=models/inference_model_tx2.sim.onnx
 labelfile-path=labels.txt
+
 gie-unique-id=1
 network-mode=0
 parse-bbox-func-name=deepstream_rfdetr_bbox

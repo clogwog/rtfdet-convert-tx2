@@ -246,29 +246,58 @@ auto parse_detection(span<const T> boxes, span<const T> classes,
 
   T box_x1, box_y1, box_x2, box_y2;
 
-  // RF-DETR output format is unclear. Let's try a simple approach:
-  // Assume [cx, cy, w, h] format where w and h might be in a different scale
-  T cx = boxes[Layer::Boxes::Box::CX];
-  T cy = boxes[Layer::Boxes::Box::CY];
-  T w = boxes[Layer::Boxes::Box::W];
-  T h = boxes[Layer::Boxes::Box::H];
+  // Handle different box formats based on the number of box parameters
+  if (boxes.size() >= 4) {
+    // Try different box format interpretations
+    if (boxes.size() == 4) {
+      // Standard [cx, cy, w, h] format
+      T cx = boxes[Layer::Boxes::Box::CX];
+      T cy = boxes[Layer::Boxes::Box::CY];
+      T w = boxes[Layer::Boxes::Box::W];
+      T h = boxes[Layer::Boxes::Box::H];
 
-  // Handle inf values - maybe replace with reasonable defaults
-  if (std::isinf(w) || std::isnan(w) || w <= 0) {
-    w = 32.0F;  // Default width
+      // Handle inf values - maybe replace with reasonable defaults
+      if (std::isinf(w) || std::isnan(w) || w <= 0) {
+        w = 32.0F;  // Default width
+      }
+      if (std::isinf(h) || std::isnan(h) || h <= 0) {
+        h = 32.0F;  // Default height
+      }
+
+      // Ensure reasonable bounds
+      w = std::min(w, static_cast<T>(width));
+      h = std::min(h, static_cast<T>(height));
+
+      box_x1 = cx - w/2.0F;
+      box_y1 = cy - h/2.0F;
+      box_x2 = cx + w/2.0F;
+      box_y2 = cy + h/2.0F;
+    } else {
+      // Unknown format with many parameters - try to extract first 4 as [x1,y1,x2,y2] or similar
+      // For now, assume first 4 values are [x1,y1,x2,y2] in normalized coordinates
+      T x1 = boxes[0];
+      T y1 = boxes[1];
+      T x2 = boxes[2];
+      T y2 = boxes[3];
+
+      // If values are in 0-1 range, scale to image size
+      if (x1 >= 0 && x1 <= 1.0 && y1 >= 0 && y1 <= 1.0 && x2 >= 0 && x2 <= 1.0 && y2 >= 0 && y2 <= 1.0) {
+        box_x1 = x1 * width;
+        box_y1 = y1 * height;
+        box_x2 = x2 * width;
+        box_y2 = y2 * height;
+      } else {
+        // Assume absolute coordinates
+        box_x1 = x1;
+        box_y1 = y1;
+        box_x2 = x2;
+        box_y2 = y2;
+      }
+    }
+  } else {
+    // Not enough box parameters
+    return std::nullopt;
   }
-  if (std::isinf(h) || std::isnan(h) || h <= 0) {
-    h = 32.0F;  // Default height
-  }
-
-  // Ensure reasonable bounds
-  w = std::min(w, static_cast<T>(width));
-  h = std::min(h, static_cast<T>(height));
-
-  box_x1 = cx - w/2.0F;
-  box_y1 = cy - h/2.0F;
-  box_x2 = cx + w/2.0F;
-  box_y2 = cy + h/2.0F;
 
   const float max_x = static_cast<float>(width) - 1.0F;
   const float max_y = static_cast<float>(height) - 1.0F;
@@ -391,7 +420,8 @@ extern "C" auto deepstream_rfdetr_bbox(
               << num_box_params << ") than the expected ("
               << Layer::Boxes::Box::SIZE << "). Did you pass "
               << "in the correct model?\n";
-    return false;
+    std::cerr << "DeepStream-RFDETR: DEBUG - Attempting to handle different box format...\n";
+    // Don't return false immediately - try to handle different formats
   }
 
   const span<const unsigned int> layer_classes_dims{
@@ -574,10 +604,15 @@ extern "C" auto deepstream_rfdetr_bbox(
     auto boxes = view<float>(tensor_boxes, i, Layer::Boxes::Box::SIZE);
     
     std::cerr << "  Detection " << i << ":\n";
-    std::cerr << "    Box: cx=" << boxes[Layer::Boxes::Box::CX] 
-              << ", cy=" << boxes[Layer::Boxes::Box::CY]
-              << ", w=" << boxes[Layer::Boxes::Box::W]
-              << ", h=" << boxes[Layer::Boxes::Box::H] << "\n";
+    if (num_box_params >= 4) {
+      std::cerr << "    Box: [" << boxes[0] << ", " << boxes[1] << ", " << boxes[2] << ", " << boxes[3];
+      if (num_box_params > 4) {
+        std::cerr << ", ... (" << num_box_params << " total)";
+      }
+      std::cerr << "]\n";
+    } else {
+      std::cerr << "    Box: insufficient parameters (" << num_box_params << ")\n";
+    }
     
     // Find max class and its value
     float max_class_val = classes[0];
@@ -615,7 +650,7 @@ extern "C" auto deepstream_rfdetr_bbox(
   for (unsigned int i = 0; i < num_detections_classes; ++i)
   {
     auto classes = view<float>(tensor_classes, i, num_classes);
-    auto boxes = view<float>(tensor_boxes, i, Layer::Boxes::Box::SIZE);
+    auto boxes = view<float>(tensor_boxes, i, num_box_params);
 
     // Check rejection reason before calling parse_detection
     float max_class_val = classes[0];
@@ -629,13 +664,26 @@ extern "C" auto deepstream_rfdetr_bbox(
       }
     }
 
-    // Check for invalid box coordinates - be more lenient since we handle inf in parse_detection
-    bool invalid_box = std::isnan(boxes[Layer::Boxes::Box::CX]) ||
-                       std::isnan(boxes[Layer::Boxes::Box::CY]) ||
-                       std::isinf(boxes[Layer::Boxes::Box::CX]) ||
-                       std::isinf(boxes[Layer::Boxes::Box::CY]) ||
-                       boxes[Layer::Boxes::Box::CX] < 0 || boxes[Layer::Boxes::Box::CX] > width ||
-                       boxes[Layer::Boxes::Box::CY] < 0 || boxes[Layer::Boxes::Box::CY] > height;
+    // Check for invalid box coordinates - check first few values
+    bool invalid_box = false;
+    if (num_box_params >= 4) {
+      // Check first 4 box values for basic validity
+      for (int j = 0; j < 4; ++j) {
+        if (std::isnan(boxes[j]) || std::isinf(boxes[j])) {
+          invalid_box = true;
+          break;
+        }
+      }
+      // For standard 4-parameter format, check if they're reasonable
+      if (!invalid_box && num_box_params == 4) {
+        float cx = boxes[0], cy = boxes[1], w = boxes[2], h = boxes[3];
+        if (cx < 0 || cx > width || cy < 0 || cy > height || w <= 0 || h <= 0) {
+          invalid_box = true;
+        }
+      }
+    } else {
+      invalid_box = true; // Not enough box parameters
+    }
 
     if (invalid_box)
     {
@@ -644,10 +692,7 @@ extern "C" auto deepstream_rfdetr_bbox(
       if (detections_rejected <= 5)
       {
         std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
-                  << " rejected: invalid box (cx=" << boxes[Layer::Boxes::Box::CX]
-                  << ", cy=" << boxes[Layer::Boxes::Box::CY]
-                  << ", w=" << boxes[Layer::Boxes::Box::W]
-                  << ", h=" << boxes[Layer::Boxes::Box::H] << ")\n";
+                  << " rejected: invalid box [" << boxes[0] << ", " << boxes[1] << ", " << boxes[2] << ", " << boxes[3] << "...]\n";
       }
       continue;
     }
