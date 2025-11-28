@@ -668,7 +668,7 @@ extern "C" auto deepstream_rfdetr_bbox(
         else
         {
           std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
-                    << " rejected: threshold check failed (max_idx=" << max_class_idx
+                    << " rejected: low confidence (max_idx=" << max_class_idx
                     << ", max_val=" << max_class_val << ")\n";
         }
       }
@@ -677,19 +677,34 @@ extern "C" auto deepstream_rfdetr_bbox(
 
     detections_passed++;
     detections.push_back(*detection);
-    
+
     // Debug first few successful detections
     if (detections_passed <= 3)
     {
-      std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i 
+      // Find top 5 classes
+      std::vector<std::pair<float, std::size_t>> class_scores;
+      for (std::size_t j = 0; j < num_classes; ++j)
+      {
+        class_scores.emplace_back(classes[j], j);
+      }
+      std::sort(class_scores.rbegin(), class_scores.rend());
+
+      std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i
                 << " passed: class=" << detection->classId
                 << ", conf=" << detection->detectionConfidence
                 << ", bbox=[" << detection->left << ", " << detection->top
                 << ", " << detection->width << ", " << detection->height << "]\n";
+      std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i << " top 5 classes: ";
+      for (std::size_t j = 0; j < std::min(5ul, class_scores.size()); ++j)
+      {
+        std::cerr << "[" << class_scores[j].second << "]=" << class_scores[j].first;
+        if (j < 4) std::cerr << ", ";
+      }
+      std::cerr << "\n";
     }
   }
 
-  std::cerr << "DeepStream-RFDETR: DEBUG - Summary: " << detections_passed 
+  std::cerr << "DeepStream-RFDETR: DEBUG - Summary: " << detections_passed
             << " passed, " << detections_rejected << " rejected\n";
   if (detections_rejected > 0)
   {
