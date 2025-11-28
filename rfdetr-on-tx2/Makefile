@@ -21,7 +21,7 @@ ifeq ($(DEV),1)
 CXXFLAGS += -O0 -ggdb3 -Werror
 endif
 
-LIBS := /usr/lib/aarch64-linux-gnu/libnvinfer.so.8
+LIBS := /usr/lib/aarch64-linux-gnu/gstreamer-1.0/deepstream/libnvdsgst_infer.so
 LDFLAGS := -shared -Wl,-rpath,/usr/lib/aarch64-linux-gnu
 
 TARGET := libdeepstream-rfdetr.so
