@@ -347,8 +347,81 @@ extern "C" auto deepstream_rfdetr_bbox(
     return false;
   }
 
+  // Debug: Check layer buffer information
+  std::cerr << "DeepStream-RFDETR: DEBUG - Layer buffer information:\n";
+  std::cerr << "  - layer_classes buffer: " << layer_classes->buffer << "\n";
+  std::cerr << "  - layer_classes dataType: " << static_cast<int>(layer_classes->dataType) << " (0=FLOAT, 1=HALF, 2=INT8, 3=INT32, 4=INT8_CAL)\n";
+  std::cerr << "  - layer_boxes buffer: " << layer_boxes->buffer << "\n";
+  std::cerr << "  - layer_boxes dataType: " << static_cast<int>(layer_boxes->dataType) << " (0=FLOAT, 1=HALF, 2=INT8, 3=INT32, 4=INT8_CAL)\n";
+  
+  // Check if buffers are null
+  if (layer_classes->buffer == nullptr)
+  {
+    std::cerr << "DeepStream-RFDETR: ERROR - layer_classes buffer is NULL!\n";
+    return false;
+  }
+  if (layer_boxes->buffer == nullptr)
+  {
+    std::cerr << "DeepStream-RFDETR: ERROR - layer_boxes buffer is NULL!\n";
+    return false;
+  }
+
+  // Check raw bytes to see if there's any data at all
+  std::cerr << "DeepStream-RFDETR: DEBUG - First 32 raw bytes from classes buffer (hex):\n";
+  const unsigned char* classes_bytes = reinterpret_cast<const unsigned char*>(layer_classes->buffer);
+  for (std::size_t i = 0; i < std::min(32ul, static_cast<std::size_t>(num_detections_classes * num_classes * sizeof(float))); ++i)
+  {
+    std::cerr << std::hex << static_cast<unsigned int>(classes_bytes[i]) << " ";
+    if ((i + 1) % 16 == 0)
+    {
+      std::cerr << "\n";
+    }
+  }
+  std::cerr << std::dec << "\n";
+  
+  std::cerr << "DeepStream-RFDETR: DEBUG - First 32 raw bytes from boxes buffer (hex):\n";
+  const unsigned char* boxes_bytes = reinterpret_cast<const unsigned char*>(layer_boxes->buffer);
+  for (std::size_t i = 0; i < std::min(32ul, static_cast<std::size_t>(num_detections_boxes * num_box_params * sizeof(float))); ++i)
+  {
+    std::cerr << std::hex << static_cast<unsigned int>(boxes_bytes[i]) << " ";
+    if ((i + 1) % 16 == 0)
+    {
+      std::cerr << "\n";
+    }
+  }
+  std::cerr << std::dec << "\n";
+
   auto tensor_classes = layer_to_span<float>(*layer_classes);
   auto tensor_boxes = layer_to_span<float>(*layer_boxes);
+
+  std::cerr << "DeepStream-RFDETR: DEBUG - Tensor spans:\n";
+  std::cerr << "  - tensor_classes size: " << tensor_classes.size() << "\n";
+  std::cerr << "  - tensor_boxes size: " << tensor_boxes.size() << "\n";
+  std::cerr << "  - tensor_classes data pointer: " << tensor_classes.data() << "\n";
+  std::cerr << "  - tensor_boxes data pointer: " << tensor_boxes.data() << "\n";
+
+  // Check first few raw float values
+  std::cerr << "DeepStream-RFDETR: DEBUG - First 10 raw float values from classes tensor:\n";
+  for (std::size_t i = 0; i < std::min(10ul, tensor_classes.size()); ++i)
+  {
+    std::cerr << "    [" << i << "] = " << tensor_classes[i];
+    if (std::isnan(tensor_classes[i]))
+    {
+      std::cerr << " (NaN)";
+    }
+    std::cerr << "\n";
+  }
+  
+  std::cerr << "DeepStream-RFDETR: DEBUG - First 10 raw float values from boxes tensor:\n";
+  for (std::size_t i = 0; i < std::min(10ul, tensor_boxes.size()); ++i)
+  {
+    std::cerr << "    [" << i << "] = " << tensor_boxes[i];
+    if (std::isnan(tensor_boxes[i]))
+    {
+      std::cerr << " (NaN)";
+    }
+    std::cerr << "\n";
+  }
 
   auto width = network.width;
   auto height = network.height;
