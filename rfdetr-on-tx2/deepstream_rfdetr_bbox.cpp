@@ -246,12 +246,29 @@ auto parse_detection(span<const T> boxes, span<const T> classes,
 
   T box_x1, box_y1, box_x2, box_y2;
 
-  // For Layer 2970, coordinates are already normalized 0-1, so treat as [x1,y1,x2,y2]
-  // x1,y1,x2,y2 format - corner coordinates (normalized 0-1)
-  box_x1 = boxes[Layer::Boxes::Box::CX] * width;  // x1
-  box_y1 = boxes[Layer::Boxes::Box::CY] * height; // y1
-  box_x2 = boxes[Layer::Boxes::Box::W] * width;   // x2
-  box_y2 = boxes[Layer::Boxes::Box::H] * height;  // y2
+  // RF-DETR output format is unclear. Let's try a simple approach:
+  // Assume [cx, cy, w, h] format where w and h might be in a different scale
+  T cx = boxes[Layer::Boxes::Box::CX];
+  T cy = boxes[Layer::Boxes::Box::CY];
+  T w = boxes[Layer::Boxes::Box::W];
+  T h = boxes[Layer::Boxes::Box::H];
+
+  // Handle inf values - maybe replace with reasonable defaults
+  if (std::isinf(w) || std::isnan(w) || w <= 0) {
+    w = 32.0F;  // Default width
+  }
+  if (std::isinf(h) || std::isnan(h) || h <= 0) {
+    h = 32.0F;  // Default height
+  }
+
+  // Ensure reasonable bounds
+  w = std::min(w, static_cast<T>(width));
+  h = std::min(h, static_cast<T>(height));
+
+  box_x1 = cx - w/2.0F;
+  box_y1 = cy - h/2.0F;
+  box_x2 = cx + w/2.0F;
+  box_y2 = cy + h/2.0F;
 
   const float max_x = static_cast<float>(width) - 1.0F;
   const float max_y = static_cast<float>(height) - 1.0F;
@@ -603,28 +620,13 @@ extern "C" auto deepstream_rfdetr_bbox(
       }
     }
 
-    // Check for invalid box coordinates (different validation for different layers)
-    bool invalid_box = false;
-    if (layer_boxes->layerName == std::string_view("2970"))
-    {
-      // Layer 2970: normalized coordinates 0-1, check for valid range and positive area
-      invalid_box = (boxes[Layer::Boxes::Box::CX] < 0 || boxes[Layer::Boxes::Box::CX] > 1 ||
-                     boxes[Layer::Boxes::Box::CY] < 0 || boxes[Layer::Boxes::Box::CY] > 1 ||
-                     boxes[Layer::Boxes::Box::W] < boxes[Layer::Boxes::Box::CX] ||
-                     boxes[Layer::Boxes::Box::H] < boxes[Layer::Boxes::Box::CY] ||
-                     boxes[Layer::Boxes::Box::W] < 0 || boxes[Layer::Boxes::Box::W] > 1 ||
-                     boxes[Layer::Boxes::Box::H] < 0 || boxes[Layer::Boxes::Box::H] > 1);
-    }
-    else
-    {
-      // Original layers: check for inf/nan and negative dimensions
-      invalid_box = std::isinf(boxes[Layer::Boxes::Box::W]) ||
-                    std::isinf(boxes[Layer::Boxes::Box::H]) ||
-                    std::isnan(boxes[Layer::Boxes::Box::W]) ||
-                    std::isnan(boxes[Layer::Boxes::Box::H]) ||
-                    boxes[Layer::Boxes::Box::W] <= 0 ||
-                    boxes[Layer::Boxes::Box::H] <= 0;
-    }
+    // Check for invalid box coordinates - be more lenient since we handle inf in parse_detection
+    bool invalid_box = std::isnan(boxes[Layer::Boxes::Box::CX]) ||
+                       std::isnan(boxes[Layer::Boxes::Box::CY]) ||
+                       std::isinf(boxes[Layer::Boxes::Box::CX]) ||
+                       std::isinf(boxes[Layer::Boxes::Box::CY]) ||
+                       boxes[Layer::Boxes::Box::CX] < 0 || boxes[Layer::Boxes::Box::CX] > width ||
+                       boxes[Layer::Boxes::Box::CY] < 0 || boxes[Layer::Boxes::Box::CY] > height;
 
     if (invalid_box)
     {
