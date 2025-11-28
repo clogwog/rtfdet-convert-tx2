@@ -436,7 +436,7 @@ extern "C" auto deepstream_rfdetr_bbox(
 
   if (all_nan_classes || all_nan_boxes)
   {
-    std::cerr << "DeepStream-RFDETR: ERROR - All buffer values are NaN! This indicates:\n";
+    std::cerr << "DeepStream-RFDETR: WARNING - All buffer values are NaN! This indicates:\n";
     std::cerr << "  1. The model may not be running/inferencing\n";
     std::cerr << "  2. The buffers may not be populated by the inference engine\n";
     std::cerr << "  3. There may be a configuration issue with the model\n";
@@ -446,7 +446,11 @@ extern "C" auto deepstream_rfdetr_bbox(
     std::cerr << "    - Are the output layer names correct in the config?\n";
     std::cerr << "    - Is the model engine file valid?\n";
     std::cerr << "    - Are there any errors in the TensorRT inference?\n";
-    return false;
+    std::cerr << "  Returning empty detections list (no crash, but no detections will be found).\n";
+    // Don't return false here - return true with empty detections to avoid segfault
+    // The model/inference issue needs to be fixed, but we shouldn't crash DeepStream
+    detections.clear();
+    return true;
   }
 
   auto width = network.width;
