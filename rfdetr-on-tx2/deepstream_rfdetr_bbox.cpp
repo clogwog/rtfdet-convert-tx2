@@ -288,6 +288,7 @@ extern "C" auto deepstream_rfdetr_bbox(
       std::cerr << "DeepStream-RFDETR: DEBUG - Input buffer has " << (has_nonzero ? "non-zero" : "all zero") << " values\n";
     }
   }
+  
   std::cerr << "DeepStream-RFDETR: DEBUG - All available layers:\n";
   for (std::size_t i = 0; i < layers.size(); ++i)
   {
