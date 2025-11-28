@@ -1,7 +1,7 @@
 # merge betwe RR and toms config
 [property]
 num-detected-classes=91
-net-scale-factor=1
+net-scale-factor=0.0173520736
 batch-size=1
 input-tensor-from-meta=0
 model-engine-file=rfdetr_nano.engine
@@ -11,7 +11,7 @@ network-mode=0
 offsets=123.675;116.28;103.53
 parse-bbox-func-name=deepstream_rfdetr_bbox
 custom-lib-path=/data/src/rtfdet-convert-tx2/rfdetr-on-tx2/libdeepstream-rfdetr.so
-output-blob-names=dets;labels
+output-blob-names=2970;dets;labels;4113;4117;4132
 model-color-format=0
 process-mode=1
 classifier-threshold=0.4
