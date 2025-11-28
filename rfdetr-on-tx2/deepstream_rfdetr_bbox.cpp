@@ -403,6 +403,7 @@ extern "C" auto deepstream_rfdetr_bbox(
 
   // Check first few raw float values
   std::cerr << "DeepStream-RFDETR: DEBUG - First 10 raw float values from classes tensor:\n";
+  bool all_nan_classes = true;
   for (std::size_t i = 0; i < std::min(10ul, tensor_classes.size()); ++i)
   {
     std::cerr << "    [" << i << "] = " << tensor_classes[i];
@@ -410,10 +411,15 @@ extern "C" auto deepstream_rfdetr_bbox(
     {
       std::cerr << " (NaN)";
     }
+    else
+    {
+      all_nan_classes = false;
+    }
     std::cerr << "\n";
   }
   
   std::cerr << "DeepStream-RFDETR: DEBUG - First 10 raw float values from boxes tensor:\n";
+  bool all_nan_boxes = true;
   for (std::size_t i = 0; i < std::min(10ul, tensor_boxes.size()); ++i)
   {
     std::cerr << "    [" << i << "] = " << tensor_boxes[i];
@@ -421,7 +427,26 @@ extern "C" auto deepstream_rfdetr_bbox(
     {
       std::cerr << " (NaN)";
     }
+    else
+    {
+      all_nan_boxes = false;
+    }
     std::cerr << "\n";
+  }
+
+  if (all_nan_classes || all_nan_boxes)
+  {
+    std::cerr << "DeepStream-RFDETR: ERROR - All buffer values are NaN! This indicates:\n";
+    std::cerr << "  1. The model may not be running/inferencing\n";
+    std::cerr << "  2. The buffers may not be populated by the inference engine\n";
+    std::cerr << "  3. There may be a configuration issue with the model\n";
+    std::cerr << "  4. The model may be producing invalid outputs\n";
+    std::cerr << "  Please check:\n";
+    std::cerr << "    - Is the model actually running? (check nvinfer logs)\n";
+    std::cerr << "    - Are the output layer names correct in the config?\n";
+    std::cerr << "    - Is the model engine file valid?\n";
+    std::cerr << "    - Are there any errors in the TensorRT inference?\n";
+    return false;
   }
 
   auto width = network.width;
