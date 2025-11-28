@@ -7,14 +7,16 @@ num-detected-classes=91
 
 batch-size=1
 input-tensor-from-meta=0
-model-engine-file=rfdetr_nano.onnx_b1_gpu0_fp32.engine
-onnx-file=rfdetr_nano.onnx
+# TX2-compatible model files
+model-engine-file=output/rfdetr_nano_tx2.engine
+onnx-file=output/inference_model_tx2.sim.onnx
 labelfile-path=labels.txt
 gie-unique-id=1
 network-mode=0
 parse-bbox-func-name=deepstream_rfdetr_bbox
 custom-lib-path=/data/src/rtfdet-convert-tx2/rfdetr-on-tx2/libdeepstream-rfdetr.so
-output-blob-names=2970;dets;labels;4113;4117;4132
+
+output-blob-names=dets;labels
 model-color-format=0
 process-mode=1
 classifier-threshold=0.4

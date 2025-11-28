@@ -360,23 +360,30 @@ extern "C" auto deepstream_rfdetr_bbox(
   auto layer_classes_num_dims = layer_classes->inferDims.numDims;
   auto layer_boxes_num_dims = layer_boxes->inferDims.numDims;
 
-  if (Layer::Classes::Dims::NUM_DIMS != layer_classes_num_dims ||
-      Layer::Boxes::Dims::NUM_DIMS != layer_boxes_num_dims) {
+  // Handle both 2D (traditional) and 3D (with batch dimension) tensors
+  bool has_batch_dim = (layer_classes_num_dims == 3 && layer_boxes_num_dims == 3);
+  int expected_classes_dims = has_batch_dim ? 3 : Layer::Classes::Dims::NUM_DIMS;
+  int expected_boxes_dims = has_batch_dim ? 3 : Layer::Boxes::Dims::NUM_DIMS;
+
+  if (expected_classes_dims != layer_classes_num_dims ||
+      expected_boxes_dims != layer_boxes_num_dims) {
     std::cerr << "DeepStream-RFDETR: layer number of dimensions don't match. "
                  "Did you pass in the correct model?\n"
               << "\t- " << Layer::Classes::NAME << ": "
-              << Layer::Classes::Dims::NUM_DIMS << " (expected) <-> "
+              << expected_classes_dims << " (expected) <-> "
               << layer_classes_num_dims << " (got)\n"
               << "\t- " << Layer::Boxes::NAME << ": "
-              << Layer::Boxes::Dims::NUM_DIMS << " (expected) <-> "
+              << expected_boxes_dims << " (expected) <-> "
               << layer_boxes_num_dims << " (got)\n";
     return false;
   }
 
   const span<const unsigned int> layer_boxes_dims{
       layer_boxes->inferDims.d, NVDSINFER_MAX_DIMS};
-  auto num_detections_boxes = layer_boxes_dims[Layer::Boxes::Dims::DETECTIONS];
-  auto num_box_params = layer_boxes_dims[Layer::Boxes::Dims::BOXES];
+  // Skip batch dimension if present (3D tensors)
+  int boxes_dim_offset = has_batch_dim ? 1 : 0;
+  auto num_detections_boxes = layer_boxes_dims[Layer::Boxes::Dims::DETECTIONS + boxes_dim_offset];
+  auto num_box_params = layer_boxes_dims[Layer::Boxes::Dims::BOXES + boxes_dim_offset];
 
   if (Layer::Boxes::Box::SIZE != num_box_params) {
     std::cerr << "DeepStream-RFDETR: The boxes tensor has a "
@@ -389,9 +396,11 @@ extern "C" auto deepstream_rfdetr_bbox(
 
   const span<const unsigned int> layer_classes_dims{
       layer_classes->inferDims.d, NVDSINFER_MAX_DIMS};
+  // Skip batch dimension if present (3D tensors)
+  int classes_dim_offset = has_batch_dim ? 1 : 0;
   auto num_detections_classes =
-      layer_classes_dims[Layer::Classes::Dims::DETECTIONS];
-  auto num_classes = layer_classes_dims[Layer::Classes::Dims::CLASSES];
+      layer_classes_dims[Layer::Classes::Dims::DETECTIONS + classes_dim_offset];
+  auto num_classes = layer_classes_dims[Layer::Classes::Dims::CLASSES + classes_dim_offset];
 
   std::cerr << "DeepStream-RFDETR: DEBUG - Tensor dimensions:\n";
   std::cerr << "  - Boxes tensor: " << num_detections_boxes << " detections x " << num_box_params << " params\n";
@@ -699,6 +708,20 @@ extern "C" auto deepstream_rfdetr_bbox(
       {
         std::cerr << "[" << class_scores[j].second << "]=" << class_scores[j].first;
         if (j < 4) std::cerr << ", ";
+      }
+      std::cerr << "\n";
+
+      // Also check specific classes we're interested in
+      std::cerr << "DeepStream-RFDETR: DEBUG - Detection " << i << " specific classes: ";
+      std::vector<std::pair<std::string, std::size_t>> check_classes = {
+        {"car", 4}, {"person", 1}, {"truck", 8}, {"bus", 6}, {"motorcycle", 5}, {"bicycle", 2}
+      };
+      for (const auto& [name, idx] : check_classes)
+      {
+        if (idx < num_classes)
+        {
+          std::cerr << name << "[" << idx << "]=" << classes[idx] << ", ";
+        }
       }
       std::cerr << "\n";
     }
