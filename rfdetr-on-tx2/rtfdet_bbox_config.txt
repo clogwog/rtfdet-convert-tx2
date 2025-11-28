@@ -2,8 +2,8 @@
 [property]
 num-detected-classes=91
 
-net-scale-factor=0.0173520736
-offsets=123.675;116.28;103.53
+#net-scale-factor=0.0173520736
+#offsets=123.675;116.28;103.53
 
 batch-size=1
 input-tensor-from-meta=0
@@ -22,6 +22,8 @@ maintain-aspect-ratio=1
 cluster-mode=4
 network-input-order=0
 symmetric-padding=1
+
+enable-dla=0
 
 # force-implicit-batch-dim=0  # Commented out to use default
 interval=0
