@@ -1,7 +1,7 @@
 # merge betwe RR and toms config
 [property]
 num-detected-classes=91
-net-scale-factor=0.0173520736
+net-scale-factor=1
 batch-size=1
 input-tensor-from-meta=0
 model-engine-file=rfdetr_nano.engine
@@ -21,7 +21,7 @@ maintain-aspect-ratio=1
 cluster-mode=4
 network-input-order=0
 symmetric-padding=1
-force-implicit-batch-dim=0
+# force-implicit-batch-dim=0  # Commented out to use default
 interval=0
 
 [class-attrs-all]

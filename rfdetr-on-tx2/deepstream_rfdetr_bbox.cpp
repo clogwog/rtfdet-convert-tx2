@@ -259,7 +259,16 @@ extern "C" auto deepstream_rfdetr_bbox(
     const NvDsInferNetworkInfo &network,
     const NvDsInferParseDetectionParams &params,
     std::vector<NvDsInferObjectDetectionInfo> &detections) -> bool {
-  std::cerr << "DeepStream-RFDETR: DEBUG - Parser called with " << layers.size() << " layers\n";
+  static int call_count = 0;
+  call_count++;
+  std::cerr << "DeepStream-RFDETR: DEBUG - Parser called #" << call_count << " with " << layers.size() << " layers\n";
+
+  // Check if this is during initialization (no actual inference data)
+  if (layers.empty() || (layers.size() > 0 && layers[0].buffer == nullptr)) {
+    std::cerr << "DeepStream-RFDETR: DEBUG - Initialization call (no buffers), returning true\n";
+    detections.clear();
+    return true;
+  }
   std::cerr << "DeepStream-RFDETR: DEBUG - All available layers:\n";
   for (std::size_t i = 0; i < layers.size(); ++i)
   {
