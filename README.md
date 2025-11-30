@@ -1,4 +1,4 @@
-no luck.. spend 2 days trying to change the model to something that the TX2 doesn't complain about
+no luck.. spend 2 days trying to (change the model to something that the TX2 doesn't complain about)[https://github.com/clogwog/rtfdet-convert-tx2/blob/master/rfdetr-on-tx2/download_model.py]
 only to get a runtime error during the optimisation
 ```
 Starting program: /usr/bin/gst-launch-1.0 -e filesrc location=input.mp4 \! qtdemux name=demux demux.video_0 \! queue \! h264parse \! nvv4l2decoder \! nvvideoconvert \! video/x-raw\(memory:NVMM\),width=2048,height=1368 \! mux.sink_0 nvstreammux name=mux width=2048 height=1368 batch-size=1 live-source=0 \! nvinfer config-file-path=rfdetr.txt \! nvdsosd \! nvvideoconvert \! video/x-raw\(memory:NVMM\),format=NV12 \! nvv4l2h264enc \! h264parse \! mp4mux \! filesink location=output.mp4
