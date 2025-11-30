@@ -1,5 +1,6 @@
 no luck.. spend 2 days trying to change the model to something that the TX2 doesn't complain about
 only to get a runtime error during the optimisation
+```
 Starting program: /usr/bin/gst-launch-1.0 -e filesrc location=input.mp4 \! qtdemux name=demux demux.video_0 \! queue \! h264parse \! nvv4l2decoder \! nvvideoconvert \! video/x-raw\(memory:NVMM\),width=2048,height=1368 \! mux.sink_0 nvstreammux name=mux width=2048 height=1368 batch-size=1 live-source=0 \! nvinfer config-file-path=rfdetr.txt \! nvdsosd \! nvvideoconvert \! video/x-raw\(memory:NVMM\),format=NV12 \! nvv4l2h264enc \! h264parse \! mp4mux \! filesink location=output.mp4
 [Thread debugging using libthread_db enabled]
 Using host libthread_db library "/lib/aarch64-linux-gnu/libthread_db.so.1".
@@ -65,7 +66,7 @@ __GI_raise (sig=sig@entry=6) at ../sysdeps/unix/sysv/linux/raise.c:51
 #38 0x0000007fb792b224 in ?? () from /usr/lib/aarch64-linux-gnu/libgstbase-1.0.so.0
 #39 0x0000005555b7edb0 in ?? ()
 Backtrace stopped: previous frame inner to this frame (corrupt stack?)
-
+```
 
 
 The issue is not with the model preprocessing (which works ) but with TensorRT's internal optimizer failing on complex transformer operations. This is a TensorRT bug, not a model issue.
