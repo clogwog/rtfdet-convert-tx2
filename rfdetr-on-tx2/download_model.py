@@ -11,9 +11,19 @@
 import sys
 import shutil
 
+# Add local site-packages to path for Jetson TX2 compatibility
+sys.path.insert(0, '/home/jeteye/.local/lib/python3.6/site-packages')
+
 from pathlib import Path
-import onnx
-from onnxsim import simplify
+
+# Import onnx only when needed
+try:
+    import onnx
+    ONNX_AVAILABLE = True
+except ImportError:
+    print("Warning: ONNX not available. Some functionality will be limited.")
+    ONNX_AVAILABLE = False
+    onnx = None
 
 try:
     from inference import get_model
@@ -21,6 +31,12 @@ try:
     INFERENCE_AVAILABLE = True
 except ImportError:
     INFERENCE_AVAILABLE = False
+
+try:
+    from onnxsim import simplify
+    ONNXSIM_AVAILABLE = True
+except ImportError:
+    ONNXSIM_AVAILABLE = False
 
 
 def replace_layernorm_with_identity(model):
@@ -91,7 +107,7 @@ def fix_unsqueeze_operations(model):
                 axes_tensor_name = f"{node.name}_axes"
                 axes_tensor = onnx.helper.make_tensor(
                     name=axes_tensor_name,
-                    data_type=onnx.TensorProto.INT64,
+                    data_type=onnx.TensorProto.INT32,
                     dims=[len(axes_values)],
                     vals=axes_values
                 )
@@ -405,26 +421,71 @@ def fix_encoder_slice_starts(model, slice_name):
     return False
 
 
+def replace_where_with_identity_false(model):
+    """
+    Replace Where operations with Identity operations that pass through the false_val input.
+    This bypasses the conditional logic that causes TensorRT optimizer crashes.
+
+    Where(condition, true_val, false_val) becomes: Identity(false_val)
+
+    This assumes that the false_val is the desired output in most cases.
+    """
+    nodes_to_replace = []
+
+    for node in model.graph.node:
+        if node.op_type == 'Where':
+            print(f"Found Where operation: {node.name}")
+            nodes_to_replace.append(node)
+
+    for where_node in nodes_to_replace:
+        # Get inputs: condition, true_val, false_val
+        condition_input = where_node.input[0]
+        true_val_input = where_node.input[1]
+        false_val_input = where_node.input[2]
+        where_output = where_node.output[0]
+
+        print(f"  Replacing Where with Identity: using false_val {false_val_input}")
+
+        # Create Identity node that passes through false_val
+        identity_node = onnx.helper.make_node(
+            'Identity',
+            inputs=[false_val_input],
+            outputs=[where_output],  # Keep the original output name
+            name=f"{where_node.name}_identity_false"
+        )
+
+        # Remove the original Where node and add Identity
+        model.graph.node.remove(where_node)
+        model.graph.node.append(identity_node)
+
+    return len(nodes_to_replace)
+
+
 def make_onnx_tx2_compatible(onnx_path: Path) -> None:
     """
     Convert ONNX model to TX2 compatibility by:
-    1. Replacing LayerNormalization with Identity (TRT compatibility)
-    2. Detecting Range operations (preserved for shape calculations)
-    3. Fixing Unsqueeze operations (convert axes from attribute to input format)
-    4. Converting INT64 tensors/constants to INT32
-    5. Converting INT64 inputs/outputs to INT32
-    6. Using ONNX opset version 13 for TX2 compatibility (maximum supported)
-    7. Fixing attention mechanism sequence lengths (600 queries)
-    8. Modifying query embeddings to use 600 queries
-    9. Fixing MatMul dimension mismatches
-    10. Adding proper Q/K transposes for attention computation
-    11. Simplifying attention mechanism (removing problematic transposes)
-    12. Cleaning up duplicate nodes for topological sorting
-    13. Simplifying the model
+    1. Replacing Where operations with Identity operations (Option 1)
+    2. Replacing LayerNormalization with Identity (TRT compatibility)
+    3. Detecting Range operations (preserved for shape calculations)
+    4. Fixing Unsqueeze operations (convert axes from attribute to input format)
+    5. Converting INT64 tensors/constants to INT32
+    6. Converting INT64 inputs/outputs to INT32
+    7. Using ONNX opset version 13 for TX2 compatibility (maximum supported)
+    8. Fixing attention mechanism sequence lengths (600 queries)
+    9. Modifying query embeddings to use 600 queries
+    10. Fixing MatMul dimension mismatches
+    11. Adding proper Q/K transposes for attention computation
+    12. Simplifying attention mechanism (removing problematic transposes)
+    13. Cleaning up duplicate nodes for topological sorting
+    14. Simplifying the model
 
     This function is designed to be idempotent - it can be run multiple times
     on the same model without causing issues.
     """
+    if not ONNX_AVAILABLE:
+        print("Error: ONNX library not available. Cannot process ONNX models.")
+        return
+
     print("Making ONNX model TX2 compatible...")
 
     # Load the model
@@ -436,6 +497,14 @@ def make_onnx_tx2_compatible(onnx_path: Path) -> None:
         print("ℹ️ Model appears to already be TX2-compatible. Running fixes anyway to ensure completeness...")
     else:
         print("📦 Processing fresh RF-DETR model for TX2 compatibility...")
+
+    # Replace Where operations with arithmetic equivalents (Option 1)
+    print("\\nReplacing Where operations with arithmetic equivalents...")
+    where_replaced = replace_where_with_identity_false(model)
+    if where_replaced > 0:
+        print(f"✅ Replaced {where_replaced} Where operations with arithmetic equivalents")
+    else:
+        print("ℹ️ No Where operations found to replace")
 
     # Fix Range operation input issue (TensorRT requires scalar inputs)
     print("\\nFixing Range operation scalar input issue...")
@@ -1272,9 +1341,13 @@ def make_onnx_tx2_compatible(onnx_path: Path) -> None:
             print(f"Converting initializer {tensor.name} from INT64 to INT32")
             tensor.data_type = onnx.TensorProto.INT32
             # Convert the actual data
-            int64_data = onnx.numpy_helper.to_array(tensor)
-            int32_data = int64_data.astype('int32')
-            tensor.CopyFrom(onnx.numpy_helper.from_array(int32_data, tensor.name))
+            try:
+                int64_data = onnx.numpy_helper.to_array(tensor)
+                if int64_data.size > 0:  # Only convert non-empty tensors
+                    int32_data = int64_data.astype('int32')
+                    tensor.CopyFrom(onnx.numpy_helper.from_array(int32_data, tensor.name))
+            except ValueError as e:
+                print(f"  Skipping {tensor.name}: {e}")
             converted_count += 1
 
     # Also check for Constant nodes with INT64 values (convert all of them)
@@ -1283,6 +1356,18 @@ def make_onnx_tx2_compatible(onnx_path: Path) -> None:
             for attr in node.attribute:
                 if attr.name == 'value' and hasattr(attr, 't') and attr.t.data_type == onnx.TensorProto.INT64:
                     print(f"Converting Constant node {node.name} from INT64 to INT32")
+                    int64_data = onnx.numpy_helper.to_array(attr.t)
+                    int32_data = int64_data.astype('int32')
+                    attr.t.data_type = onnx.TensorProto.INT32
+                    attr.t.CopyFrom(onnx.numpy_helper.from_array(int32_data))
+                    converted_count += 1
+
+    # Also check for ConstantOfShape nodes with INT64 values
+    for node in model.graph.node:
+        if node.op_type == 'ConstantOfShape':
+            for attr in node.attribute:
+                if attr.name == 'value' and hasattr(attr, 't') and attr.t.data_type == onnx.TensorProto.INT64:
+                    print(f"Converting ConstantOfShape node {node.name} from INT64 to INT32")
                     int64_data = onnx.numpy_helper.to_array(attr.t)
                     int32_data = int64_data.astype('int32')
                     attr.t.data_type = onnx.TensorProto.INT32
@@ -1303,36 +1388,94 @@ def make_onnx_tx2_compatible(onnx_path: Path) -> None:
             value_info.type.tensor_type.elem_type = onnx.TensorProto.INT32
             converted_count += 1
 
+    # Remove allowzero attributes from Reshape operations (opset 14 feature not supported in opset 13)
+    for node in model.graph.node:
+        if node.op_type == 'Reshape':
+            attrs_to_remove = []
+            for attr in node.attribute:
+                if attr.name == 'allowzero':
+                    attrs_to_remove.append(attr)
+                    print(f"Removing allowzero attribute from Reshape node {node.name}")
+            for attr in attrs_to_remove:
+                node.attribute.remove(attr)
+                converted_count += 1
+
+    # Convert Unsqueeze operations from opset 13 format (axes as input) to opset 11 format (axes as attribute)
+    # TensorRT doesn't support the newer Unsqueeze format
+    for node in model.graph.node:
+        if node.op_type == 'Unsqueeze' and len(node.input) >= 2:
+            # Check if the second input is a constant that contains axes values
+            axes_input = node.input[1]
+            axes_values = None
+
+            # Look for the constant node
+            for const_node in model.graph.node:
+                if const_node.op_type == 'Constant' and const_node.output[0] == axes_input:
+                    for attr in const_node.attribute:
+                        if attr.name == 'value':
+                            axes_values = onnx.numpy_helper.to_array(attr.t)
+                            if axes_values.ndim == 0:
+                                axes_values = [axes_values.item()]
+                            else:
+                                axes_values = axes_values.tolist()
+                            break
+                    break
+
+            if axes_values is not None:
+                # Convert to attribute format
+                axes_attr = onnx.helper.make_attribute('axes', axes_values)
+                node.attribute.append(axes_attr)
+
+                # Remove the axes input
+                node.input.pop(1)
+
+                # Remove the constant node if it's not used elsewhere
+                const_used_elsewhere = False
+                for other_node in model.graph.node:
+                    if other_node != node and axes_input in other_node.input:
+                        const_used_elsewhere = True
+                        break
+
+                if not const_used_elsewhere:
+                    if const_node in model.graph.node:
+                        model.graph.node.remove(const_node)
+
+                print(f"Converted Unsqueeze {node.name} from input format to attribute format")
+                converted_count += 1
+
     # Set ONNX opset version to 13 for TX2 compatibility (maximum supported)
     if model.opset_import[0].version != 13:
         print(f"Setting ONNX opset version from {model.opset_import[0].version} to 13 for TX2 compatibility")
         model.opset_import[0].version = 13
 
-    # Simplify the model
-    print("Simplifying ONNX model...")
-    try:
-        # Try with default settings first
-        model_simp, check = simplify(model)
-        if check:
-            model = model_simp
-            print("✅ ONNX model simplified successfully")
-        else:
-            print("⚠️ ONNX simplification check failed, trying alternative approach...")
-            # Try with more permissive settings
-            try:
-                model_simp, check = simplify(model, perform_optimization=False, skip_fuse_bn=True)
-                if check:
-                    model = model_simp
-                    print("✅ ONNX model simplified with alternative settings")
-                else:
-                    print("⚠️ Alternative simplification also failed, using original model")
-            except Exception as e2:
-                print(f"⚠️ Alternative simplification failed: {e2}, using original model")
-    except Exception as e:
-        print(f"⚠️ ONNX simplification failed: {e}")
-        print("This is usually due to newer ONNX ops not supported by current onnxsim version")
-        print("The model will still work for TX2, but may not be optimally simplified")
-        print("Consider updating onnxsim: pip install --upgrade onnxsim")
+    # Simplify the model (if onnxsim is available)
+    if ONNXSIM_AVAILABLE:
+        print("Simplifying ONNX model...")
+        try:
+            # Try with default settings first
+            model_simp, check = simplify(model)
+            if check:
+                model = model_simp
+                print("✅ ONNX model simplified successfully")
+            else:
+                print("⚠️ ONNX simplification check failed, trying alternative approach...")
+                # Try with more permissive settings
+                try:
+                    model_simp, check = simplify(model, perform_optimization=False, skip_fuse_bn=True)
+                    if check:
+                        model = model_simp
+                        print("✅ ONNX model simplified with alternative settings")
+                    else:
+                        print("⚠️ Alternative simplification also failed, using original model")
+                except Exception as e2:
+                    print(f"⚠️ Alternative simplification failed: {e2}, using original model")
+        except Exception as e:
+            print(f"⚠️ ONNX simplification failed: {e}")
+            print("This is usually due to newer ONNX ops not supported by current onnxsim version")
+            print("The model will still work for TX2, but may not be optimally simplified")
+            print("Consider updating onnxsim: pip install --upgrade onnxsim")
+    else:
+        print("ℹ️ ONNX simplification skipped (onnxsim not available)")
 
     # Fix query embeddings to have 600 queries instead of 300
     print("\\nFixing query embeddings to use 600 queries...")
@@ -1992,6 +2135,7 @@ def make_onnx_tx2_compatible(onnx_path: Path) -> None:
 
     # Provide summary of what was done
     print("✅ TX2 compatibility conversion completed:")
+    print(f"   • {where_replaced} Where operations replaced with Identity operations")
     print(f"   • {layernorm_count} LayerNormalization nodes replaced with Identity")
     print(f"   • {range_count} Range operations detected (preserved for shape calculations)")
     print(f"   • {unsqueeze_count} Unsqueeze operations converted to input format")
